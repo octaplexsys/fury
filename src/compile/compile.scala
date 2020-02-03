@@ -574,9 +574,11 @@ case class Compilation(graph: Target.Graph,
                     globalPolicy: Policy,
                     args: List[String])(implicit log: Log)
   : Future[CompileResult] = Future.fromTry {
+    val originId = System.currentTimeMillis().toString
 
     val uri: String = str"file://${layout.workDir(target.id).value}?id=${target.id.key}"
     val params = new CompileParams(List(new BuildTargetIdentifier(uri)).asJava)
+    params.setOriginId(originId)
     if(pipelining) params.setArguments(List("--pipeline").asJava)
     val furyTargetIds = deepDependencies(target.id).toList
     
@@ -588,12 +590,17 @@ case class Compilation(graph: Target.Graph,
     val scalacOptionsParams = new ScalacOptionsParams(bspTargetIds.asJava)
 
     BloopServer.borrow(layout.baseDir, this, target.id, layout) { conn =>
-      
+
       val result: Try[CompileResult] = {
         for {
           res <- wrapServerErrors(conn.server.buildTargetCompile(params))
           opts <- wrapServerErrors(conn.server.buildTargetScalacOptions(scalacOptionsParams))
         } yield CompileResult(res, opts)
+      }
+
+      val responseOriginId = result.get.bspCompileResult.getOriginId
+      if(responseOriginId != originId){
+        log.warn(s"Expected $originId, but got $responseOriginId")
       }
 
       result.get.scalacOptions.getItems.asScala.foreach { case soi =>
