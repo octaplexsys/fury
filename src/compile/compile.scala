@@ -53,7 +53,7 @@ trait FuryBspServer extends BuildServer with ScalaBuildServer
 
 object BloopServer extends Lifecycle.Shutdown with Lifecycle.ResourceHolder {
   override type Resource = Connection
-  
+
   Lifecycle.bloopServer.complete(Success(this))
  
   private var lock: Promise[Unit] = Promise.successful(())
@@ -428,7 +428,7 @@ case class Compilation(graph: Target.Graph,
     checkouts.checkouts.traverse(_.get(layout, https)).map{ _ => ()}
 
   def generateFiles(layout: Layout)(implicit log: Log): Try[Iterable[Path]] = synchronized {
-    Bloop.clean(layout).flatMap(Bloop.generateFiles(this, layout).waive)
+    Bloop.generateFiles(this, layout)
   }
 
   def classpath(ref: ModuleRef, layout: Layout): Set[Path] = {
@@ -578,7 +578,7 @@ case class Compilation(graph: Target.Graph,
 
     val uri: String = str"file://${layout.workDir(target.id).value}?id=${target.id.key}"
     val params = new CompileParams(List(new BuildTargetIdentifier(uri)).asJava)
-    params.setOriginId(originId)
+    params.setOriginId(newOriginId())
     if(pipelining) params.setArguments(List("--pipeline").asJava)
     val furyTargetIds = deepDependencies(target.id).toList
     
@@ -609,12 +609,13 @@ case class Compilation(graph: Target.Graph,
         val responseTargetId = bspToFury(bti)
         if(!furyTargetIds.contains(responseTargetId)){
           log.warn(s"buildTarget/scalacOptions: Unexpected $responseTargetId")
+        } else {
+          val permanentClassesDir = layout.classesDir(responseTargetId)
+          val temporaryClassesDir = Path(new URI(classDir))
+          temporaryClassesDir.copyTo(permanentClassesDir)
+          //TODO the method setClassDirectory modifies a mutable structure. Consider refactoring
+          soi.setClassDirectory(permanentClassesDir.javaFile.toURI.toString)
         }
-        val permanentClassesDir = layout.classesDir(responseTargetId)
-        val temporaryClassesDir = Path(new URI(classDir))
-        temporaryClassesDir.copyTo(permanentClassesDir)
-        //TODO the method setClassDirectory modifies a mutable structure. Consider refactoring
-        soi.setClassDirectory(permanentClassesDir.javaFile.toURI.toString)
       }
 
       result.get
@@ -706,6 +707,10 @@ case class Compilation(graph: Target.Graph,
     multiplexer(target.ref) = StopRun(target.ref)
 
     exitCode
+  }
+
+  private def newOriginId(): String = {
+    System.currentTimeMillis().toString
   }
 
 }
